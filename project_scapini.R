@@ -5,24 +5,32 @@
 # ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
-# GitHub
+# Questions professor
+# ------------------------------------------------------------------------------
+# 1) shrinking the data? Because before old equilibrium. What about Subprime + Euro crisis + COVID effect?
+# 2) autoarima or loop (which doesn't work)?
+# 3) Step-in or Direct forecasting?
+# 4) Reporting: transform in year or quarter TS, but no yoy growth rate or log, right?
+
+
+# ------------------------------------------------------------------------------
+# Connecting GitHub
 # ------------------------------------------------------------------------------
 library(usethis)
 use_git()
 use_github()
 
-
 # ------------------------------------------------------------------------------
 # Load packages and functions
 # ------------------------------------------------------------------------------
 library(tsbox)
-library(forecast) # Useful package for ARMA models
+library(forecast)
 library(quantmod)
 library(xts)
 library(ggplot2)   
 library(seasonal)
-library(CADFtest) # Useful package for conducting unit root tests
-library(reshape2) # Useful to reshape data frames (for some specific plots)
+library(CADFtest)
+library(reshape2) 
 library(lubridate)
 
 # Delete all objects in the memory
@@ -31,7 +39,7 @@ rm(list=ls())
 # Load user-defined commands and packages
 source("UserPackages.R")
 
-# Here, it executes the function and creates the folder in the current directory
+# Create the folder in the current directory
 setwd("~/Personale/UNINE/Master_Applied_Economics/Sem1/Macro/Project")
 mainDir <- getwd()
 outDir <- makeOutDir(mainDir, "/ResultsProject")
@@ -42,30 +50,82 @@ outDir <- makeOutDir(mainDir, "/ResultsProject")
 UR <- read.csv("Data/LRHU24TTIEM156S.csv", header = T, sep = ",")
 UR <- xts(UR[, 2], order.by = as.Date(UR[, 1], format = "%d/%m/%Y"))
 
+start_date <- "1999-01-01"
+# UR <- ts_span(UR, start = start_date, end = NULL)
+# Discussion: mean from 1983: 17.46%. Mean from 1999: 15.15%
+
+# Official NBER recessions from http://www.nber.org/cycles.html
+# These will be plotted along with the indicator
+NBERREC <- read.table(textConnection(
+  "Peak, Trough
+  1857-06-01, 1858-12-01
+  1860-10-01, 1861-06-01
+  1865-04-01, 1867-12-01
+  1869-06-01, 1870-12-01
+  1873-10-01, 1879-03-01
+  1882-03-01, 1885-05-01
+  1887-03-01, 1888-04-01
+  1890-07-01, 1891-05-01
+  1893-01-01, 1894-06-01
+  1895-12-01, 1897-06-01
+  1899-06-01, 1900-12-01
+  1902-09-01, 1904-08-01
+  1907-05-01, 1908-06-01
+  1910-01-01, 1912-01-01
+  1913-01-01, 1914-12-01
+  1918-08-01, 1919-03-01
+  1920-01-01, 1921-07-01
+  1923-05-01, 1924-07-01
+  1926-10-01, 1927-11-01
+  1929-08-01, 1933-03-01
+  1937-05-01, 1938-06-01
+  1945-02-01, 1945-10-01
+  1948-11-01, 1949-10-01
+  1953-07-01, 1954-05-01
+  1957-08-01, 1958-04-01
+  1960-04-01, 1961-02-01
+  1969-12-01, 1970-11-01
+  1973-11-01, 1975-03-01
+  1980-01-01, 1980-07-01
+  1981-07-01, 1982-11-01
+  1990-07-01, 1991-03-01
+  2001-03-01, 2001-11-01
+  2007-12-01, 2009-06-01
+  2011-01-01, 2013-01-01
+  2020-02-01, 2020-04-01"), sep = ',',
+  colClasses = c('Date', 'Date'), header = TRUE)
+NBERREC <- subset(NBERREC, Peak >= as.Date(start_date))
+
 # ------------------------------------------------------------------------------
 # Plotting and data transformation
 # ------------------------------------------------------------------------------
 # Plotting the TS
-ts_plot(
-  `Youth Unemployment Rate`= UR,
-  title = "Youth Unemployment Rate",
-  subtitle = "Percentage, seasonally adjusted"
-)
-ts_save(filename = paste(outDir, "Youth_UR.pdf", sep = "/"), width = 8, height = 7, open = FALSE)
-# No apparent visual trend spotted 
+g <- ggplot(UR) + geom_line(aes(x = index(UR), y = UR)) + theme_minimal()
+g <- g + geom_rect(data = NBERREC, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
+g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate")
+g
+ggsave(paste(outDir,"Youth_UR.pdf", sep = "/"), plot = last_plot(), width = 10, height = 8, units = c("cm"))
+
+# ts_plot(
+#   `Youth Unemployment Rate`= UR,
+#   title = "15-24 y/o Unemployment Rate",
+#   subtitle = "Percentage, seasonally adjusted",
+#   ylab = "Youth Unemployment rate [%]"
+# )
+# ts_save(filename = paste(outDir, "Youth_UR.pdf", sep = "/"), width = 8, height = 7, open = FALSE)
+# Discussion: No apparent visual trend spotted 
 
 # Check uni-variability
 urootUR_drift = CADFtest(UR, max.lag.y = 10, type = "drift", criterion = "BIC")
 summary(urootUR_drift)
-# p-value < 0.05. So reject the null hypothesis (non-stationary around a constant mean, phi = 1)
+# Discussion: p-value < 0.05. So reject the null hypothesis (non-stationary around a constant mean, phi = 1)
 # The TS is CSP
-
-# UR <- ts_span(UR, start = NULL, end = NULL)
 
 # p <- plotACF(UR, lag.max = 24)+theme_minimal()
 # p <- ggLayout(p)
 # p
 # ggsave(paste(outDir, "URAcf.pdf", sep = "/"), plot = last_plot(), width = 12, height = 9, units = c("cm")) 
+# Discussion: no seasonality spotted
 
 # autoplot(decompose(ts_ts(UR), "additive"))
 
