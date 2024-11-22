@@ -16,9 +16,9 @@
 # ------------------------------------------------------------------------------
 # Connecting GitHub
 # ------------------------------------------------------------------------------
-library(usethis)
-use_git()
-use_github()
+# library(usethis)
+# use_git()
+# use_github()
 
 # ------------------------------------------------------------------------------
 # Load packages and functions
@@ -50,7 +50,7 @@ outDir <- makeOutDir(mainDir, "/ResultsProject")
 UR <- read.csv("Data/LRHU24TTIEM156S.csv", header = T, sep = ",")
 UR <- xts(UR[, 2], order.by = as.Date(UR[, 1], format = "%d/%m/%Y"))
 
-start_date <- "1999-01-01"
+start_date <- index(UR)[1]
 # UR <- ts_span(UR, start = start_date, end = NULL)
 # Discussion: mean from 1983: 17.46%. Mean from 1999: 15.15%
 
@@ -91,18 +91,19 @@ NBERREC <- read.table(textConnection(
   1990-07-01, 1991-03-01
   2001-03-01, 2001-11-01
   2007-12-01, 2009-06-01
-  2011-01-01, 2013-01-01
   2020-02-01, 2020-04-01"), sep = ',',
   colClasses = c('Date', 'Date'), header = TRUE)
 NBERREC <- subset(NBERREC, Peak >= as.Date(start_date))
 
+NBERREC2 <- data.frame(Peak = as.Date("2011-11-01"), Trough = as.Date("2013-01-01"))
 # ------------------------------------------------------------------------------
 # Plotting and data transformation
 # ------------------------------------------------------------------------------
 # Plotting the TS
 g <- ggplot(UR) + geom_line(aes(x = index(UR), y = UR)) + theme_minimal()
 g <- g + geom_rect(data = NBERREC, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
-g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate")
+g <- g + geom_rect(data = NBERREC2, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
+g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate", subtitle = "Percentage, seasonally adjusted")
 g
 ggsave(paste(outDir,"Youth_UR.pdf", sep = "/"), plot = last_plot(), width = 10, height = 8, units = c("cm"))
 
