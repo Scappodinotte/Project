@@ -8,8 +8,9 @@
 # Questions professor
 # ------------------------------------------------------------------------------
 # 1) shrinking the data? Because before old equilibrium. What about Subprime + Euro crisis + COVID effect?
-# 2) autoarima or loop (which doesn't work)?
-# 3) Step-in or Direct forecasting?
+#  or use dummies to controll for the crisis
+# 2) Create a training and test data? 
+# 3) Build model with monthly or quarterly data?
 # 4) Reporting: transform in year or quarter TS, but no yoy growth rate or log, right?
 
 
@@ -42,13 +43,16 @@ source("UserPackages.R")
 # Create the folder in the current directory
 setwd("~/Personale/UNINE/Master_Applied_Economics/Sem1/Macro/Project")
 mainDir <- getwd()
-outDir <- makeOutDir(mainDir, "/ResultsProject")
+# outDir <- makeOutDir(mainDir, "/ResultsProject")
 
 # ------------------------------------------------------------------------------
 # Import data
 # ------------------------------------------------------------------------------
 UR <- read.csv("Data/LRHU24TTIEM156S.csv", header = T, sep = ",")
 UR <- xts(UR[, 2], order.by = as.Date(UR[, 1], format = "%d/%m/%Y"))
+URq <- ts_frequency(UR, to = "quarter", aggregate = "last")
+# UR <- log(UR)
+# Mean with log: 15.93
 
 start_date <- index(UR)[1]
 # UR <- ts_span(UR, start = start_date, end = NULL)
@@ -94,8 +98,8 @@ NBERREC <- read.table(textConnection(
   2020-02-01, 2020-04-01"), sep = ',',
   colClasses = c('Date', 'Date'), header = TRUE)
 NBERREC <- subset(NBERREC, Peak >= as.Date(start_date))
-
 NBERREC2 <- data.frame(Peak = as.Date("2011-11-01"), Trough = as.Date("2013-01-01"))
+
 # ------------------------------------------------------------------------------
 # Plotting and data transformation
 # ------------------------------------------------------------------------------
@@ -103,9 +107,10 @@ NBERREC2 <- data.frame(Peak = as.Date("2011-11-01"), Trough = as.Date("2013-01-0
 g <- ggplot(UR) + geom_line(aes(x = index(UR), y = UR)) + theme_minimal()
 g <- g + geom_rect(data = NBERREC, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
 g <- g + geom_rect(data = NBERREC2, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
-g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate", subtitle = "Percentage, seasonally adjusted")
+g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate", subtitle = "Quartely, seasonally adjusted")
 g
 ggsave(paste(outDir,"Youth_UR.pdf", sep = "/"), plot = last_plot(), width = 10, height = 8, units = c("cm"))
+# Discussion: No apparent visual trend spotted 
 
 # ts_plot(
 #   `Youth Unemployment Rate`= UR,
@@ -114,66 +119,63 @@ ggsave(paste(outDir,"Youth_UR.pdf", sep = "/"), plot = last_plot(), width = 10, 
 #   ylab = "Youth Unemployment rate [%]"
 # )
 # ts_save(filename = paste(outDir, "Youth_UR.pdf", sep = "/"), width = 8, height = 7, open = FALSE)
-# Discussion: No apparent visual trend spotted 
 
 # Check uni-variability
 urootUR_drift = CADFtest(UR, max.lag.y = 10, type = "drift", criterion = "BIC")
 summary(urootUR_drift)
+urootUR_drift = CADFtest(ts_diff(UR), max.lag.y = 10, type = "drift", criterion = "BIC")
+summary(urootUR_drift)
+
+# Taking simple difference 
+URd <- ts_diff(UR)
+URd[1] <- 0
 # Discussion: p-value < 0.05. So reject the null hypothesis (non-stationary around a constant mean, phi = 1)
-# The TS is CSP
+# The TS is non CSP, after the first differenve it is. 
 
-# p <- plotACF(UR, lag.max = 24)+theme_minimal()
-# p <- ggLayout(p)
-# p
-# ggsave(paste(outDir, "URAcf.pdf", sep = "/"), plot = last_plot(), width = 12, height = 9, units = c("cm")) 
-# Discussion: no seasonality spotted
-
-# autoplot(decompose(ts_ts(UR), "additive"))
-
+train <- ts_span(URd, start = NULL, end = "2011-12-01")
+test <- ts_span(URd, start = "2012-01-01", end = NULL)
 # ------------------------------------------------------------------------------
 # Model selection and diagnostic
 # ------------------------------------------------------------------------------
-model1 = auto.arima(UR, max.p = 6, max.q = 6, d = 0, ic = c("bic"), allowmean = TRUE, seasonal = FALSE, stepwise = FALSE)
+maxP <- 8   # Maximum number of AR lags
+maxQ <- 8   # Maximum number of MA lags
+
+model1 <- auto.arima(URd, max.p = maxP, max.q = maxQ, d = 0, ic = c("bic"), allowmean = TRUE, seasonal = FALSE, stepwise = FALSE)
 summary(model1)
-# The best model from the auto arima function is ARMA(1,4)
+# The best model from the auto arima function is ARMA(4,1)
 
 checkresiduals(model1)
-# Residuals show some significant Autocorrelation, which means that there is room for improvement
+# Residuals show some small significant Autocorrelation at t=5, 7 and 21, which means that there is room for improvement.
 
-# maxP <- 6   # Maximum number of AR lags
-# maxQ <- 6   # Maximum number of MA lags
-# 
-# # Objects to save the criteria for every possible lag structure
-# AIC = matrix(data=NA,nrow=maxP+1,ncol=maxQ+1)
-# BIC = matrix(data=NA,nrow=maxP+1,ncol=maxQ+1)
-# colnames(AIC) <- 0:maxQ
-# colnames(BIC) <- 0:maxQ
-# rownames(AIC) <- 0:maxP
-# rownames(BIC) <- 0:maxP
-# 
-# # Loop over all possible lag orders, estimate the model, and save the criteria
-# # in a matrix
-# for (p in 0:maxP){
-#   for (q in 0:maxQ){
-# 
-#     # Estimate the corresponding model
-#     temp <- Arima(UR, order = c(p, 0, q), include.constant= TRUE)
-# 
-#     # Save the information criterion
-#     AIC[p+1, q+1] <- temp$aic
-#     BIC[p+1, q+1] <- temp$bic
-#   }
-# }
-# 
-# # Find the lag order with the smallest information criterion (nameMin() is a
-# # user-defined function that is useful to find the name of the columns and rows
-# # of the minimum value of a matrix)
-# minCritAIC <- nameMin(AIC)
-# minCritBIC <- nameMin(BIC)
-# 
-# print("Lag order according to AIC and BIC (p, q)")
-# minCritAIC
-# minCritBIC
+# Objects to save the criteria for every possible lag structure
+BIC = matrix(data=NA,nrow=maxP+1,ncol=maxQ+1)
+colnames(BIC) <- 0:maxQ
+rownames(BIC) <- 0:maxP
+
+# Loop over all possible lag orders, estimate the model, and save the criteria
+# in a matrix
+for (p in 0:maxP){
+  for (q in 0:maxQ){
+
+    # Estimate the corresponding model
+    temp <- Arima(URd, order = c(p, 0, q), include.constant= TRUE)
+
+    # Save the information criterion
+    BIC[p+1, q+1] <- temp$bic
+  }
+}
+
+# Find the lag order with the smallest information criterion (nameMin() is a
+# user-defined function that is useful to find the name of the columns and rows
+# of the minimum value of a matrix)
+minCritBIC <- nameMin(BIC)
+
+print("Lag order according to AIC and BIC (p, q)")
+minCritBIC
+model2 <- Arima(URd, order = c(7, 0, 0), include.constant= TRUE)
+summary(model2)
+checkresiduals(model2)
+# Autocorrelation at t = 5 and 7 has disappear. now auto at t = 21
 
 # ------------------------------------------------------------------------------
 # Forecasting 15 months (from 10/2024, to 12/2025)
