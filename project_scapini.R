@@ -7,18 +7,13 @@
 # ------------------------------------------------------------------------------
 # Questions professor
 # ------------------------------------------------------------------------------
-# 1) shrinking the data? Because before old equilibrium. What about Subprime + Euro crisis + COVID effect?
-#  or use dummies to controll for the crisis
-# 2) Create a training and test data? 
-# 3) Build model with monthly or quarterly data?
-# 4) Reporting: transform in year or quarter TS, but no yoy growth rate or log, right?
-
+# Create a training and test data? --> optional estimate the model with the whole TS
 
 # ------------------------------------------------------------------------------
 # Connecting GitHub
 # ------------------------------------------------------------------------------
-# library(usethis)
-# use_git()
+library(usethis)
+use_git()
 # use_github()
 
 # ------------------------------------------------------------------------------
@@ -50,9 +45,6 @@ mainDir <- getwd()
 # ------------------------------------------------------------------------------
 UR <- read.csv("Data/LRHU24TTIEM156S.csv", header = T, sep = ",")
 UR <- xts(UR[, 2], order.by = as.Date(UR[, 1], format = "%d/%m/%Y"))
-URq <- ts_frequency(UR, to = "quarter", aggregate = "last")
-# UR <- log(UR)
-# Mean with log: 15.93
 
 start_date <- index(UR)[1]
 # UR <- ts_span(UR, start = start_date, end = NULL)
@@ -107,39 +99,37 @@ NBERREC2 <- data.frame(Peak = as.Date("2011-11-01"), Trough = as.Date("2013-01-0
 g <- ggplot(UR) + geom_line(aes(x = index(UR), y = UR)) + theme_minimal()
 g <- g + geom_rect(data = NBERREC, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
 g <- g + geom_rect(data = NBERREC2, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
-g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate", subtitle = "Quartely, seasonally adjusted")
+g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate", subtitle = "Monthly, seasonally adjusted")
 g
 ggsave(paste(outDir,"Youth_UR.pdf", sep = "/"), plot = last_plot(), width = 10, height = 8, units = c("cm"))
 # Discussion: No apparent visual trend spotted 
 
-# ts_plot(
-#   `Youth Unemployment Rate`= UR,
-#   title = "15-24 y/o Unemployment Rate",
-#   subtitle = "Percentage, seasonally adjusted",
-#   ylab = "Youth Unemployment rate [%]"
-# )
-# ts_save(filename = paste(outDir, "Youth_UR.pdf", sep = "/"), width = 8, height = 7, open = FALSE)
-
 # Check uni-variability
 urootUR_drift = CADFtest(UR, max.lag.y = 10, type = "drift", criterion = "BIC")
 summary(urootUR_drift)
+# Discussion: the TS is not CSP
 urootUR_drift = CADFtest(ts_diff(UR), max.lag.y = 10, type = "drift", criterion = "BIC")
 summary(urootUR_drift)
+# Discussion: once taking the first difference, TS is CSP
 
 # Taking simple difference 
 URd <- ts_diff(UR)
-URd[1] <- 0
-# Discussion: p-value < 0.05. So reject the null hypothesis (non-stationary around a constant mean, phi = 1)
-# The TS is non CSP, after the first differenve it is. 
 
-train <- ts_span(URd, start = NULL, end = "2011-12-01")
-test <- ts_span(URd, start = "2012-01-01", end = NULL)
+# Check the autocorrelation of the series
+plotACF(URd, lag.max = 24)
+# Discussion: This suggest a seasonality at quarterly frequency
+
+# Creating the train and test data
+# train <- ts_span(URd, start = NULL, end = "2011-12-01")
+# test <- ts_span(URd, start = "2012-01-01", end = NULL)
+
 # ------------------------------------------------------------------------------
 # Model selection and diagnostic
 # ------------------------------------------------------------------------------
 maxP <- 8   # Maximum number of AR lags
 maxQ <- 8   # Maximum number of MA lags
 
+# METHOD 1: Auto Arima
 model1 <- auto.arima(URd, max.p = maxP, max.q = maxQ, d = 0, ic = c("bic"), allowmean = TRUE, seasonal = FALSE, stepwise = FALSE)
 summary(model1)
 # The best model from the auto arima function is ARMA(4,1)
@@ -147,32 +137,31 @@ summary(model1)
 checkresiduals(model1)
 # Residuals show some small significant Autocorrelation at t=5, 7 and 21, which means that there is room for improvement.
 
+# METHOD 2: Manual selection
 # Objects to save the criteria for every possible lag structure
-BIC = matrix(data=NA,nrow=maxP+1,ncol=maxQ+1)
+BIC = matrix(data = NA,nrow = maxP + 1, ncol = maxQ + 1)
 colnames(BIC) <- 0:maxQ
 rownames(BIC) <- 0:maxP
 
 # Loop over all possible lag orders, estimate the model, and save the criteria
-# in a matrix
 for (p in 0:maxP){
   for (q in 0:maxQ){
 
     # Estimate the corresponding model
-    temp <- Arima(URd, order = c(p, 0, q), include.constant= TRUE)
+    temp <- Arima(URd, order = c(p, 0, q), include.constant = TRUE)
 
     # Save the information criterion
-    BIC[p+1, q+1] <- temp$bic
+    BIC[p + 1, q + 1] <- temp$bic
   }
 }
 
-# Find the lag order with the smallest information criterion (nameMin() is a
-# user-defined function that is useful to find the name of the columns and rows
-# of the minimum value of a matrix)
+# Find the lag order with the smallest information criterion
 minCritBIC <- nameMin(BIC)
 
 print("Lag order according to AIC and BIC (p, q)")
 minCritBIC
-model2 <- Arima(URd, order = c(7, 0, 0), include.constant= TRUE)
+
+model2 <- Arima(URd, order = c(7, 0, 0), include.constant = TRUE)
 summary(model2)
 checkresiduals(model2)
 # Autocorrelation at t = 5 and 7 has disappear. now auto at t = 21
@@ -232,3 +221,12 @@ ts_plot(
   subtitle = "Percentage"
 )
 ts_save(filename = paste(outDir, "/CPIFcstyoy.pdf", sep = ""), width = 8, height = 5, open = FALSE)
+
+
+# ts_plot(
+#   `Youth Unemployment Rate`= UR,
+#   title = "15-24 y/o Unemployment Rate",
+#   subtitle = "Percentage, seasonally adjusted",
+#   ylab = "Youth Unemployment rate [%]"
+# )
+# ts_save(filename = paste(outDir, "Youth_UR.pdf", sep = "/"), width = 8, height = 7, open = FALSE)
