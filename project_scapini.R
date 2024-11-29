@@ -8,6 +8,7 @@
 # Questions professor
 # ------------------------------------------------------------------------------
 
+
 # ------------------------------------------------------------------------------
 # Connecting GitHub
 # ------------------------------------------------------------------------------
@@ -43,9 +44,11 @@ outDir <- makeOutDir(mainDir, "/ResultsProject")
 # ------------------------------------------------------------------------------
 # Import data
 # ------------------------------------------------------------------------------
+# Import time series
 UR <- read.csv("Data/LRHU24TTIEM156S.csv", header = T, sep = ",")
 UR <- xts(UR[, 2], order.by = as.Date(UR[, 1], format = "%d/%m/%Y"))
 
+# Fix start date
 start_date <- index(UR)[1]
 
 # Official NBER recessions from http://www.nber.org/cycles.html
@@ -99,10 +102,10 @@ g <- g + geom_rect(data = NBERREC, aes(xmin = Peak, xmax = Trough, ymin = -Inf, 
 g <- g + geom_rect(data = NBERREC2, aes(xmin = Peak, xmax = Trough, ymin = -Inf, ymax = +Inf), fill = 'grey', alpha = 0.5)
 g <- g + xlab("Years") + ylab("Youth Unemployment Rate [%]") + ggtitle("15-24 y/o Unemployment Rate", subtitle = "Monthly, seasonally adjusted")
 g
-ggsave(paste(outDir,"Youth_UR.pdf", sep = "/"), plot = last_plot(), width = 10, height = 8, units = c("cm"))
-# Discussion: No apparent visual trend spotted 
+ggsave(paste(outDir,"Youth_UR.jpeg", sep = "/"), plot = last_plot(), width = 15, height = 10, units = c("cm"))
+# Discussion: No apparent trend visually spotted 
 
-# Check uni-variability
+# Check unit root process
 urootUR_drift = CADFtest(UR, max.lag.y = 10, type = "drift", criterion = "BIC")
 summary(urootUR_drift)
 # Discussion: the TS is not CSP
@@ -113,13 +116,14 @@ summary(urootUR_drift)
 # Taking simple difference 
 URd <- ts_ts(ts_diff(UR))
 
+# Check for seasonality
+ggsubseriesplot(ts_ts(UR))
+ggsave(paste(outDir,"Seasonality.jpeg", sep = "/"), plot = last_plot(), width = 15, height = 10, units = c("cm"))
+# Discussion: no seasonality spotted, means do not change over different months
+
 # Check the autocorrelation of the series
 plotACF(URd, lag.max = 24)
 # Discussion: This suggest a seasonality at quarterly frequency
-
-# Creating the train and test data
-# train <- ts_span(URd, start = NULL, end = "2011-12-01")
-# test <- ts_span(URd, start = "2012-01-01", end = NULL)
 
 # ------------------------------------------------------------------------------
 # Model selection and diagnostic
@@ -132,16 +136,21 @@ model1 <- auto.arima(URd, max.p = maxP, max.q = maxQ, d = 0, ic = c("bic"), allo
 summary(model1)
 # The best model from the auto arima function is ARMA(4,1)
 
-checkresiduals(model1)
-# Residuals show some small significant Autocorrelation at t=5, 7 and 21, which means that there is room for improvement.
+# Get R squared for model 1
+cor(ts_span(URd, start = "1983-02-01"), fitted(model1))^2
+# Discussion: R2 is 40%
 
-# # METHOD 2: Manual selection
+# Check residuals model 1
+checkresiduals(model1)
+# Residuals show some significant Autocorrelation at t=5, 7 and 21, which means that there is room for improvement.
+
+# # METHOD 2: Automated BIC selection
 # # Objects to save the criteria for every possible lag structure
 # BIC = matrix(data = NA,nrow = maxP + 1, ncol = maxQ + 1)
 # colnames(BIC) <- 0:maxQ
 # rownames(BIC) <- 0:maxP
 # 
-# Loop over all possible lag orders, estimate the model, and save the criteria
+# #Loop over all possible lag orders, estimate the model, and save the criteria
 # for (p in 0:maxP){
 #   for (q in 0:maxQ){
 # 
@@ -157,34 +166,37 @@ checkresiduals(model1)
 # minCritBIC <- nameMin(BIC)
 # 
 # print("Lag order according to AIC and BIC (p, q)")
-# 
 # minCritBIC
 
+# Estimate the best model from automated BIC selection 
 model2 <- Arima(URd, order = c(7, 0, 0), include.constant = TRUE)
 summary(model2)
+
+# Get R2 for model 2
+cor(ts_span(URd, start = "1983-02-01"), ts_span(fitted(model2), start = "1983-02-01"))^2
+# The R2 is 42%
+
+# Check residuals for model 2
 checkresiduals(model2)
-# Autocorrelation at t = 5 and 7 has disappear. now auto at t = 21
+# Discussion: Autocorrelation at t = 5 and 7 has disappear. now auto at t = 21
 
 # ------------------------------------------------------------------------------
 # Forecasting 15 months (from 10/2024, to 12/2025)
 # ------------------------------------------------------------------------------
-# Step in forecast using AutoArima
+# Iterated forecast model 2
 maxh <- 15
-
 forecast <- forecast(model2, h = maxh)
-autoplot(forecast) + theme_minimal()
 
-# Merge the history and the forecast. Replace first observation with the first value of the UR 
-# because of missing value
+# Merge the history and the forecast
 temp1 <- ts_bind(forecast$x, forecast$mean)
 
-# Set first value to the first valeu of UR
+# Set first value to the first value of UR
 temp1[1] <- UR[1]
 
 # Calculate the cumulative sum of the difference on monthly frequency
 temp1 <- ts_cumsum(temp1)
 
-# Aggregate to annual frequency
+# Aggregate to yearly frequency
 temp1_y <- ts_frequency(temp1, to = "year", aggregate = "mean")
 
 # ------------------------------------------------------------------------------
@@ -193,7 +205,7 @@ temp1_y <- ts_frequency(temp1, to = "year", aggregate = "mean")
 # Calculate variance
 sigma2 <- getForecastVariance(forecast)
 
-# MONTE CARLO SIMULATION : Simulate a normal distribution around each forecast point
+# MONTE CARLO SIMULATION : Simulate a normal distribution around each forecast point estimate
 set.seed(5)
 NSim <- 100   # Number of simulations (S)
 H    <- 15   # Maximum forecast horizon
@@ -266,19 +278,17 @@ for (s in 1:NSim){
   }
 }
 
+# Reduce the accumulated simulations to the forecast time period
 fcst_start <- ts_summary(forecast$mean)$start
 hist_end   <- ts_summary(forecast$x)$end
-
-# Reduce the accumulated simulations to the forecast time period
 sim_fcst_cum <- ts_span(sim_fcst_cum, start = fcst_start)
 sim_fcst_cum_q <- ts_span(sim_fcst_cum_q, start = fcst_start)
-sim_fcst_cum_y <- ts_span(sim_fcst_cum_y, start = fcst_start)
 
 # ------------------------------------------------------------------------------
 # Plotting
 # ------------------------------------------------------------------------------
 # Split series in history and forecast for the plot
-start_span <- "2020-01-01"
+start_span <- "2022-01-01"
 
 HistUR <- ts_span(temp1, start = start_span, hist_end)
 FcstUR <- ts_span(temp1, fcst_start, NULL)
@@ -289,60 +299,77 @@ ts_plot(
   title = "Irish Youth Unemployment Rate and forecast",
   subtitle = "Percentage"
 )
-ts_save(filename = paste(outDir, "/FrcstUR.pdf", sep = ""), width = 8, height = 5, open = FALSE)
+ts_save(filename = paste(outDir, "/FrcstUR.jpeg", sep = ""), width = 10, height = 8, open = FALSE)
 
-# Plot some interval forecasts for annual GDP growth
+# Plot confidence interval forecasts
 ci95 <- as.xts(t(apply(sim_fcst_cum, 1, quantile, probs = c(0.025, .5, 0.975),  na.rm = TRUE)))
 ts_plot(
-  `History`= UR,
-  `Upper`  = ci95[, "97.5%"],
-  `Median` = ci95[, "50%"],
-  `Lower`  = ci95[, "2.5%"],
+  `History`= HistUR,
+  `Forecast` = FcstUR,
+  `Upper95`  = ci95[, "97.5%"],
+  `Lower95`  = ci95[, "2.5%"],
   title = "Irish Youth Unemployment Rate and forecast",
   subtitle = "Percentage"
 )
-ts_save(paste(outDir,"/Youth_UR_forecasted.pdf", sep = ""), width = 10, height = 8, open = F)
+ts_save(paste(outDir,"/Youth_UR_forecasted.jpeg", sep = ""), width = 10, height = 8, open = F)
 
 # ------------------------------------------------------------------------------
-# Table Reporting
+# Tables Reporting
 # ------------------------------------------------------------------------------
 table <- data.frame(t(data.frame(Year = index(temp1_y), Youth_UR = as.matrix(temp1_y))))
-write_xlsx(table, "Yearly_table.xlsx", col_names = F)
+write_xlsx(table, paste(outDir,"/Yearly_table.xlsx", sep = ""), col_names = F)
+
+# Report monthly confidence interval for 2024 forecast
+ci95["2024-10-01", ]
+ci95["2024-11-01", ]
+ci95["2024-12-01", ]
+
+# Report quarterly confidence interval for 2025 forecast
+ci95_q <- as.xts(t(apply(sim_fcst_cum_q, 1, quantile, probs = c(0.025, 0.975),  na.rm = TRUE)))
+ci95_q["2025-01-01", ]
+ci95_q["2025-04-01", ]
+ci95_q["2025-07-01", ]
+ci95_q["2025-10-01", ]
+
+# Report yearly confidence interval for 2024/25 forecast
 ci95_y <- as.xts(t(apply(sim_fcst_cum_y, 1, quantile, probs = c(0.025, 0.975),  na.rm = TRUE)))
 ci95_24 <- ci95_y["2024-01-01", ]
 ci95_25 <- ci95_y["2025-01-01", ]
+ci95_24
+ci95_25
+
 
 # ------------------------------------------------------------------------------
 # Calculate Probability
 # ------------------------------------------------------------------------------
-# Probability calculation
-Pmin <- 8
-Pmax <- 12
+# Set historical values
+Pmin <- 10.1 #min(UR[seq.Date(from = as.Date("2023-01-01"), to = as.Date("2023-12-01"), by = "month")])
+Pmax <- 11.6 #max(UR[seq.Date(from = as.Date("2023-01-01"), to = as.Date("2023-12-01"), by = "month")])
 
-# Calculate probability of UR being smaller than 6.2%, which is the historical min 
-PNeg <- mean(sim_fcst_cum_q["2025-01-01", ] < Pmin)
+# Calculate probability of UR being smaller than 10.1%, which is the 2023 min 
+PNeg <- mean(sim_fcst_cum_q["2025-10-01", ] < Pmin)
 
-# Calculate probability of UR being bigger than 20%, which is the COVID 19 max
-PLarge <- mean(sim_fcst_cum_q["2025-01-01", ] > Pmax)
+# Calculate probability of UR being bigger than 11.6%, which is the 2023 max
+PLarge <- mean(sim_fcst_cum_q["2025-10-01", ] > Pmax)
 
-# Calculate probability of UR being bigger than 20%, and smaller than 6.2%
-PBetween <- mean(sim_fcst_cum_q["2025-01-01", ] <= Pmax & sim_fcst_cum_q["2025-01-01", ] > Pmin)
+# Calculate probability of UR being bigger than 10.1%, and smaller than 11.6%
+PBetween <- mean(sim_fcst_cum_q["2025-10-01", ] <= Pmax & sim_fcst_cum_q["2025-10-01", ] > Pmin)
 
 PNeg
 PLarge
 PBetween
-PNeg + PLarge + PBetween
+PNeg + PBetween
 
-# Do a nice bar chart for over-heating and recession probabilities
+# Bar chart for exceeding 2023 values
 PNeg <- rowMeans(sim_fcst_cum_q < Pmin)
 PLarge <- rowMeans(sim_fcst_cum_q > Pmax)
 PNorm <- 1 - PNeg - PLarge
 
 prob.data <- data.frame(index(sim_fcst_cum_q), PLarge, PNorm, PNeg)
-colnames(prob.data) = c("Date", "High", "Normal", "Low")
+colnames(prob.data) = c("Date", "Higher", "Normal", "Lower")
 prob.data <- melt(prob.data,id.vars = "Date") 
 ggplot(prob.data, aes(x = Date, y = value, fill = variable)) +
   geom_bar(stat = 'identity') + theme_minimal() + 
-  ggtitle("Probability of a high, low, and normal youth unemployment rate")
-ggsave(paste(outDir,"/ProbChart.pdf", sep = ""), plot = last_plot(), width = 10, height = 8, units = c("cm"))
+  ggtitle("Probability of a higher, lower, and normal YUR compared to 2023")
+ggsave(paste(outDir,"/ProbChart.jpeg", sep = ""), plot = last_plot(), width = 16, height = 11, units = c("cm"))
 
