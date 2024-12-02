@@ -5,15 +5,10 @@
 # ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
-# Questions professor
-# ------------------------------------------------------------------------------
-
-
-# ------------------------------------------------------------------------------
 # Connecting GitHub
 # ------------------------------------------------------------------------------
-library(usethis)
-use_git()
+# library(usethis)
+# use_git()
 # use_github()
 
 # ------------------------------------------------------------------------------
@@ -91,7 +86,12 @@ NBERREC <- read.table(textConnection(
   2020-02-01, 2020-04-01"), sep = ',',
   colClasses = c('Date', 'Date'), header = TRUE)
 NBERREC <- subset(NBERREC, Peak >= as.Date(start_date))
-NBERREC2 <- data.frame(Peak = as.Date("2011-11-01"), Trough = as.Date("2013-01-01"))
+
+# Introducing European Sovereign debt crisis for Ireland
+# https://ireland.representation.ec.europa.eu/news-and-events/news/circumstances-behind-irelands-bailout-late-naughties-2019-04-06_en
+NBERREC2 <- data.frame(Peak = as.Date("2010-11-01"), Trough = as.Date("2013-12-01"))
+
+
 
 # ------------------------------------------------------------------------------
 # Plotting and data transformation
@@ -123,7 +123,9 @@ ggsave(paste(outDir,"Seasonality.jpeg", sep = "/"), plot = last_plot(), width = 
 
 # Check the autocorrelation of the series
 plotACF(URd, lag.max = 24)
-# Discussion: This suggest a seasonality at quarterly frequency
+# Discussion: This suggest a "seasonality" at quarterly frequency
+
+
 
 # ------------------------------------------------------------------------------
 # Model selection and diagnostic
@@ -174,11 +176,13 @@ summary(model2)
 
 # Get R2 for model 2
 cor(ts_span(URd, start = "1983-02-01"), ts_span(fitted(model2), start = "1983-02-01"))^2
-# The R2 is 42%
+# Discussion: The R2 is 42%
 
 # Check residuals for model 2
 checkresiduals(model2)
 # Discussion: Autocorrelation at t = 5 and 7 has disappear. now auto at t = 21
+
+
 
 # ------------------------------------------------------------------------------
 # Forecasting 15 months (from 10/2024, to 12/2025)
@@ -196,8 +200,13 @@ temp1[1] <- UR[1]
 # Calculate the cumulative sum of the difference on monthly frequency
 temp1 <- ts_cumsum(temp1)
 
+# Aggregate to quarterly frequency
+temp1_q <- ts_frequency(temp1, to = "quarter", aggregate = "mean")
+
 # Aggregate to yearly frequency
 temp1_y <- ts_frequency(temp1, to = "year", aggregate = "mean")
+
+
 
 # ------------------------------------------------------------------------------
 # Compute forecast error variance and simulate forecast density
@@ -284,6 +293,8 @@ hist_end   <- ts_summary(forecast$x)$end
 sim_fcst_cum <- ts_span(sim_fcst_cum, start = fcst_start)
 sim_fcst_cum_q <- ts_span(sim_fcst_cum_q, start = fcst_start)
 
+
+
 # ------------------------------------------------------------------------------
 # Plotting
 # ------------------------------------------------------------------------------
@@ -297,24 +308,31 @@ ts_plot(
   `History`= HistUR,
   `Forecast` = FcstUR,
   title = "Irish Youth Unemployment Rate and forecast",
-  subtitle = "Percentage"
+  subtitle = "Percentage, monthly, seasonally adjusted"
 )
 ts_save(filename = paste(outDir, "/FrcstUR.jpeg", sep = ""), width = 10, height = 8, open = FALSE)
 
 # Plot confidence interval forecasts
 ci95 <- as.xts(t(apply(sim_fcst_cum, 1, quantile, probs = c(0.025, .5, 0.975),  na.rm = TRUE)))
+op <- options(
+  tsbox.lwd = 2,
+  tsbox.col = c("black","red" ,"gray51", "gray51"),
+  tsbox.lty = c("solid", "solid", "dashed", "dotted")
+)
 ts_plot(
   `History`= HistUR,
   `Forecast` = FcstUR,
   `Upper95`  = ci95[, "97.5%"],
   `Lower95`  = ci95[, "2.5%"],
   title = "Irish Youth Unemployment Rate and forecast",
-  subtitle = "Percentage"
+  subtitle = "Percentage, monthly, seasonally adjusted"
 )
 ts_save(paste(outDir,"/Youth_UR_forecasted.jpeg", sep = ""), width = 10, height = 8, open = F)
 
+
+
 # ------------------------------------------------------------------------------
-# Tables Reporting
+# Table Reporting
 # ------------------------------------------------------------------------------
 table <- data.frame(t(data.frame(Year = index(temp1_y), Youth_UR = as.matrix(temp1_y))))
 write_xlsx(table, paste(outDir,"/Yearly_table.xlsx", sep = ""), col_names = F)
@@ -324,8 +342,9 @@ ci95["2024-10-01", ]
 ci95["2024-11-01", ]
 ci95["2024-12-01", ]
 
-# Report quarterly confidence interval for 2025 forecast
+# Report quarterly confidence interval for 24/25 forecast
 ci95_q <- as.xts(t(apply(sim_fcst_cum_q, 1, quantile, probs = c(0.025, 0.975),  na.rm = TRUE)))
+ci95_q["2024-10-01", ]
 ci95_q["2025-01-01", ]
 ci95_q["2025-04-01", ]
 ci95_q["2025-07-01", ]
@@ -339,21 +358,22 @@ ci95_24
 ci95_25
 
 
+
 # ------------------------------------------------------------------------------
-# Calculate Probability
+# Calculate Probability Forecast
 # ------------------------------------------------------------------------------
 # Set historical values
 Pmin <- 10.1 #min(UR[seq.Date(from = as.Date("2023-01-01"), to = as.Date("2023-12-01"), by = "month")])
 Pmax <- 11.6 #max(UR[seq.Date(from = as.Date("2023-01-01"), to = as.Date("2023-12-01"), by = "month")])
 
 # Calculate probability of UR being smaller than 10.1%, which is the 2023 min 
-PNeg <- mean(sim_fcst_cum_q["2025-10-01", ] < Pmin)
+PNeg <- mean(sim_fcst_cum_y["2025-01-01", ] < Pmin)
 
 # Calculate probability of UR being bigger than 11.6%, which is the 2023 max
-PLarge <- mean(sim_fcst_cum_q["2025-10-01", ] > Pmax)
+PLarge <- mean(sim_fcst_cum_y["2025-01-01", ] > Pmax)
 
 # Calculate probability of UR being bigger than 10.1%, and smaller than 11.6%
-PBetween <- mean(sim_fcst_cum_q["2025-10-01", ] <= Pmax & sim_fcst_cum_q["2025-10-01", ] > Pmin)
+PBetween <- mean(sim_fcst_cum_y["2025-01-01", ] <= Pmax & sim_fcst_cum_y["2025-01-01", ] > Pmin)
 
 PNeg
 PLarge
@@ -366,9 +386,9 @@ PLarge <- rowMeans(sim_fcst_cum_q > Pmax)
 PNorm <- 1 - PNeg - PLarge
 
 prob.data <- data.frame(index(sim_fcst_cum_q), PLarge, PNorm, PNeg)
-colnames(prob.data) = c("Date", "Higher", "Normal", "Lower")
+colnames(prob.data) = c("Date", ">11.6%", "Between", "<10.1%")
 prob.data <- melt(prob.data,id.vars = "Date") 
-ggplot(prob.data, aes(x = Date, y = value, fill = variable)) +
+ggplot(prob.data, aes(x = Date, y = value, fill = variable)) + scale_fill_grey() +
   geom_bar(stat = 'identity') + theme_minimal() + 
   ggtitle("Probability of a higher, lower, and normal YUR compared to 2023")
 ggsave(paste(outDir,"/ProbChart.jpeg", sep = ""), plot = last_plot(), width = 16, height = 11, units = c("cm"))
